@@ -76,35 +76,45 @@ export class UniswappyV2EthPair extends EthMarket {
     return marketPairs
   }
 
-  static async getUniswapMarketsByToken(provider: providers.JsonRpcProvider, factoryAddresses: Array<string>): Promise<GroupedMarkets> {
-    const allPairs = await Promise.all(
-      _.map(factoryAddresses, factoryAddress => UniswappyV2EthPair.getUniswappyMarkets(provider, factoryAddress))
-    )
-
-    const marketsByTokenAll = _.chain(allPairs)
-      .flatten()
-      .groupBy(pair => pair.tokens[0] === WETH_ADDRESS ? pair.tokens[1] : pair.tokens[0])
-      .value()
-
-    const allMarketPairs = _.chain(
-      _.pickBy(marketsByTokenAll, a => a.length > 1) // weird TS bug, chain'd pickBy is Partial<>
-    )
-      .values()
-      .flatten()
-      .value()
-
-    await UniswappyV2EthPair.updateReserves(provider, allMarketPairs);
-
-    const marketsByToken = _.chain(allMarketPairs)
-      .filter(pair => (pair.getBalance(WETH_ADDRESS).gt(ETHER)))
-      .groupBy(pair => pair.tokens[0] === WETH_ADDRESS ? pair.tokens[1] : pair.tokens[0])
-      .value()
-
-    return {
-      marketsByToken,
-      allMarketPairs
-    }
-  }
+  // below line == // Updated method to support multiple router addresses for fetching market pairs across different exchanges.
+  static async getUniswapMarketsByToken(provider: JsonRpcProvider, routerAddresses: string[]): Promise<Array<ExchangeEthPair>>  static async getUniswapMarketsByToken(provider: providers.JsonRpcProvider, factoryAddresses: Array<string>): Promise<GroupedMarkets> {
+  // old.code == static async getUniswapMarketsByToken(provider: providers.JsonRpcProvider, factoryAddresses: Array<string>): Promise<GroupedMarkets> {
+    const marketPairsPromises = routerAddresses.map(async (routerAddress) => {
+      const routerContract = new Contract(routerAddress, UNISWAP_ROUTER_ABI, provider);
+      const pairs = await routerContract.getPairs();
+      return pairs.map(pair => new UniswapV2EthPair(pair));
+    });
+    
+    const marketPairsArrays = await Promise.all(marketPairsPromises);
+    
+    // Flatten the array of arrays into a single array
+    const marketPairs = [].concat(...marketPairsArrays);
+    
+    return marketPairs;
+  // old.code;
+  //  const allPairs = await Promise.all(
+  //    _.map(factoryAddresses, factoryAddress => UniswappyV2EthPair.getUniswappyMarkets(provider, factoryAddress))
+  //  )
+  //  const marketsByTokenAll = _.chain(allPairs)
+  //    .flatten()
+  //    .groupBy(pair => pair.tokens[0] === WETH_ADDRESS ? pair.tokens[1] : pair.tokens[0])
+  //    .value()
+  //  const allMarketPairs = _.chain(
+  //    _.pickBy(marketsByTokenAll, a => a.length > 1) // weird TS bug, chain'd pickBy is Partial<>
+  //  )
+  //    .values()
+  //    .flatten()
+  //    .value()
+  //  await UniswappyV2EthPair.updateReserves(provider, allMarketPairs);
+  //  const marketsByToken = _.chain(allMarketPairs)
+  //    .filter(pair => (pair.getBalance(WETH_ADDRESS).gt(ETHER)))
+  //    .groupBy(pair => pair.tokens[0] === WETH_ADDRESS ? pair.tokens[1] : pair.tokens[0])
+  //    .value()
+  //  return {
+  //    marketsByToken,
+  //    allMarketPairs
+  //  }
+  //}
 
   static async updateReserves(provider: providers.JsonRpcProvider, allMarketPairs: Array<UniswappyV2EthPair>): Promise<void> {
     const uniswapQuery = new Contract(UNISWAP_LOOKUP_CONTRACT_ADDRESS, UNISWAP_QUERY_ABI, provider);

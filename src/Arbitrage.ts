@@ -15,6 +15,8 @@ export interface CrossedMarketDetails {
 
 export type MarketsByToken = { [tokenAddress: string]: Array<EthMarket> }
 
+const BLACKLISTED_ROUTERS = ['0xRouterAddress1', '0xRouterAddress2', /* ... */];
+
 // TODO: implement binary search (assuming linear/exponential global maximum profitability)
 const TEST_VOLUMES = [
   ETHER.div(100),
@@ -63,6 +65,11 @@ export function getBestCrossedMarket(crossedMarkets: Array<EthMarket>[], tokenAd
       }
     }
   }
+
+  if (BLACKLISTED_ROUTERS.includes(routerAddress)) {
+    throw new Error(`Router ${routerAddress} is blacklisted`);
+  }
+
   return bestCrossedMarket;
 }
 
@@ -122,7 +129,7 @@ export class Arbitrage {
     return bestCrossedMarkets
   }
 
-  // TODO: take more than 1
+// added code ; Unwraps any profit WETH to ETH after all arbitrage transactions have been executed and confirmed
   async takeCrossedMarkets(bestCrossedMarkets: CrossedMarketDetails[], blockNumber: number, minerRewardPercentage: number): Promise<void> {
     for (const bestCrossedMarket of bestCrossedMarkets) {
 
@@ -177,6 +184,11 @@ export class Arbitrage {
         ))
       await Promise.all(bundlePromises)
       return
+    }
+        const wethContract = new Contract(WETH_ADDRESS, WETH_ABI, this.executorWallet);
+        const wethBalance = await wethContract.balanceOf(this.executorWallet.address);
+        await wethContract.withdraw(wethBalance);
+      }
     }
     throw new Error("No arbitrage submitted to relay")
   }
