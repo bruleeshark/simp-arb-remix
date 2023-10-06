@@ -30,8 +30,7 @@ const TEST_VOLUMES = [
   ETHER.mul(10),
 ]
 
-export function getBestCrossedMarket(crossedMarkets: Array<EthMarket>[], tokenAddress: string): CrossedMarketDetails | undefined {
-  let bestCrossedMarket: CrossedMarketDetails | undefined = undefined;
+export function getBestCrossedMarket(crossedMarkets: Array<EthMarket>[], tokenAddress: string): CrossedMarketDetails | undefined {  let bestCrossedMarket: CrossedMarketDetails | undefined = undefined;
   for (const crossedMarket of crossedMarkets) {
     const sellToMarket = crossedMarket[0]
     const buyFromMarket = crossedMarket[1]
@@ -66,10 +65,6 @@ export function getBestCrossedMarket(crossedMarkets: Array<EthMarket>[], tokenAd
     }
   }
 
-  if (BLACKLISTED_ROUTERS.includes(routerAddress)) {
-    throw new Error(`Router ${routerAddress} is blacklisted`);
-  }
-
   return bestCrossedMarket;
 }
 
@@ -96,13 +91,8 @@ export class Arbitrage {
       `\n`
     )
   }
-
-
   async evaluateMarkets(marketsByToken: MarketsByToken): Promise<Array<CrossedMarketDetails>> {
-    const bestCrossedMarkets = new Array<CrossedMarketDetails>()
-
-    for (const tokenAddress in marketsByToken) {
-      const markets = marketsByToken[tokenAddress]
+    const bestCrossedMarketsPromises = Object.entries(marketsByToken).map(async ([tokenAddress, markets]) => {
       const pricedMarkets = _.map(markets, (ethMarket: EthMarket) => {
         return {
           ethMarket: ethMarket,
@@ -110,7 +100,7 @@ export class Arbitrage {
           sellTokenPrice: ethMarket.getTokensOut(WETH_ADDRESS, tokenAddress, ETHER.div(100)),
         }
       });
-
+  
       const crossedMarkets = new Array<Array<EthMarket>>()
       for (const pricedMarket of pricedMarkets) {
         _.forEach(pricedMarkets, pm => {
@@ -119,19 +109,27 @@ export class Arbitrage {
           }
         })
       }
-
+  
       const bestCrossedMarket = getBestCrossedMarket(crossedMarkets, tokenAddress);
-      if (bestCrossedMarket !== undefined && bestCrossedMarket.profit.gt(ETHER.div(1000))) {
-        bestCrossedMarkets.push(bestCrossedMarket)
-      }
+    if (bestCrossedMarket !== undefined && bestCrossedMarket.profit.gt(ETHER.div(1000))) {
+      return bestCrossedMarket;
+    } else {
+      throw new Error(`No profitable market found for token ${tokenAddress}`);
     }
-    bestCrossedMarkets.sort((a, b) => a.profit.lt(b.profit) ? 1 : a.profit.gt(b.profit) ? -1 : 0)
-    return bestCrossedMarkets
-  }
+  });
 
-// added code ; Unwraps any profit WETH to ETH after all arbitrage transactions have been executed and confirmed
-  async takeCrossedMarkets(bestCrossedMarkets: CrossedMarketDetails[], blockNumber: number, minerRewardPercentage: number): Promise<void> {
-    for (const bestCrossedMarket of bestCrossedMarkets) {
+  try {
+    const bestCrossedMarkets = await Promise.all(bestCrossedMarketsPromises);
+    return bestCrossedMarkets;
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
+
+// added code below ; Unwraps any profit WETH to ETH after all arbitrage transactions have been executed and confirmed
+ async takeCrossedMarkets(bestCrossedMarkets: CrossedMarketDetails[], blockNumber: number, minerRewardPercentage: number): Promise<void> {
+   for (const bestCrossedMarket of bestCrossedMarkets) {
 
       console.log("Send this much WETH", bestCrossedMarket.volume.toString(), "get this much profit", bestCrossedMarket.profit.toString())
       const buyCalls = await bestCrossedMarket.buyFromMarket.sellTokensToNextMarket(WETH_ADDRESS, bestCrossedMarket.volume, bestCrossedMarket.sellToMarket);
@@ -183,13 +181,12 @@ export class Arbitrage {
           targetBlockNumber
         ))
       await Promise.all(bundlePromises)
-      return
     }
-        const wethContract = new Contract(WETH_ADDRESS, WETH_ABI, this.executorWallet);
-        const wethBalance = await wethContract.balanceOf(this.executorWallet.address);
-        await wethContract.withdraw(wethBalance);
-      }
-    }
+    const wethContract = new Contract(WETH_ADDRESS, WETH_ABI, this.executorWallet);
+    const wethBalance = await wethContract.balanceOf(this.executorWallet.address);
+    await wethContract.withdraw(wethBalance);
+  }
+
     throw new Error("No arbitrage submitted to relay")
   }
 }
